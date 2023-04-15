@@ -35,7 +35,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -r requirements.txt
+# MAGIC %pip install -q -r ../../requirements.txt
 
 # COMMAND ----------
 
@@ -65,7 +65,7 @@ dbutils.widgets.text("dbfs_output_root", "", "dbfs_output_root")
 # COMMAND ----------
 
 # Cache data and tokenizer locally before creating a bunch of deepspeed processes and make sure they succeeds.
-load_training_dataset()
+load_training_dataset("data/insuranceqa/", text_column = "instruction")
 load_tokenizer()
 
 # COMMAND ----------
@@ -117,6 +117,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # MAGIC %load_ext tensorboard
 # MAGIC %tensorboard --logdir '{tensorboard_display_dir}'
+
+# COMMAND ----------
+
+# MAGIC %cd ../..
 
 # COMMAND ----------
 

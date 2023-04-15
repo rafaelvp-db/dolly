@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import click
 import numpy as np
-from datasets import Dataset, load_dataset
+from datasets import Dataset, load_dataset, load_from_disk
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -81,17 +81,26 @@ def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_lengt
     )
 
 
-def load_training_dataset(training_data_id: str = DEFAULT_TRAINING_DATASET, split: str = "train") -> Dataset:
+def load_training_dataset(
+    training_data_id: str = DEFAULT_TRAINING_DATASET,
+    split: str = "train",
+    text_column: str = "text"
+) -> Dataset:
     logger.info(f"Loading {training_data_id} dataset")
-    dataset: Dataset = load_dataset(training_data_id)[split]
+    try:
+        dataset: Dataset = load_dataset(training_data_id)[split]
+    except ValueError:
+        # Trying to load a dataset from disk
+        dataset: Dataset = load_from_disk(training_data_id)
+
     logger.info("Found %d rows", dataset.num_rows)
 
     # Remove empty responses
     response_key_stripped = RESPONSE_KEY_NL.strip()
-    dataset = dataset.filter(lambda rec: not rec["text"].strip().endswith(response_key_stripped))
+    dataset = dataset.filter(lambda rec: not rec[text_column].strip().endswith(response_key_stripped))
 
     def _func(rec):
-        rec["text"] += f"\n\n{END_KEY}"
+        rec[text_column] += f"\n\n{END_KEY}"
         return rec
 
     dataset = dataset.map(_func)
@@ -127,7 +136,13 @@ def get_model_tokenizer(
     return model, tokenizer
 
 
-def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_SEED) -> Dataset:
+def preprocess_dataset(
+    dataset: Dataset,
+    tokenizer: AutoTokenizer,
+    max_length: int,
+    seed=DEFAULT_SEED,
+    text_column = "text"
+) -> Dataset:
     """Loads the training dataset and tokenizes it so it is ready for training.
 
     Args:
@@ -138,14 +153,14 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_S
         Dataset: HuggingFace dataset
     """
 
-    dataset = load_training_dataset()
+    #dataset = load_training_dataset()
 
     logger.info("Preprocessing dataset")
     _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
     dataset = dataset.map(
         _preprocessing_function,
         batched=True,
-        remove_columns=["instruction", "input", "output", "text"],
+        remove_columns=["instruction", "input", "output", text_column],
     )
 
     logger.info("Shuffling dataset")
@@ -169,6 +184,7 @@ def train(
     local_rank,
     bf16,
     test_size=1000,
+    dataset_path = DEFAULT_TRAINING_DATASET
 ):
     set_seed(seed)
 
@@ -179,8 +195,8 @@ def train(
     # to 1024 as this is probably supported by most models.
     conf = model.config
     max_length: int = getattr(conf, "n_positions", getattr(conf, "seq_length", 1024))
-
-    processed_dataset = preprocess_dataset(tokenizer=tokenizer, max_length=max_length, seed=seed)
+    dataset = load_training_dataset(dataset_path)
+    processed_dataset = preprocess_dataset(dataset = dataset, tokenizer=tokenizer, max_length=max_length, seed=seed)
 
     split_dataset = processed_dataset.train_test_split(test_size=test_size, seed=seed)
 

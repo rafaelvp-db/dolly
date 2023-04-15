@@ -64,3 +64,21 @@ output_json = output_df.to_json(orient = "records", lines = True)
 
 with open("data/insuranceqa.jsonl", "w") as file:
     file.write(output_json)
+
+# COMMAND ----------
+
+!pip install -q datasets
+
+# COMMAND ----------
+
+from datasets import Dataset, DatasetDict
+
+
+
+# COMMAND ----------
+
+dataset = Dataset.from_pandas(output_df, preserve_index = False)
+
+# COMMAND ----------
+
+dataset.save_to_disk("data/insuranceqa")
