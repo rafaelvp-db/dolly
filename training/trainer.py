@@ -73,9 +73,9 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
         return batch
 
 
-def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_length: int) -> dict:
+def preprocess_batch(batch: Dict[str, List], tokenizer: AutoTokenizer, max_length: int, text_column: str = "text") -> dict:
     return tokenizer(
-        batch["text"],
+        batch[text_column],
         max_length=max_length,
         truncation=True,
     )
@@ -156,11 +156,13 @@ def preprocess_dataset(
     #dataset = load_training_dataset()
 
     logger.info("Preprocessing dataset")
-    _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
+    _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer, text_column=text_column)
+    remove_columns = list(dataset.features)
+
     dataset = dataset.map(
         _preprocessing_function,
         batched=True,
-        remove_columns=["instruction", "input", "output", text_column],
+        #remove_columns=["instruction", "input", "output", text_column],
     )
 
     logger.info("Shuffling dataset")
@@ -183,21 +185,25 @@ def train(
     gradient_checkpointing,
     local_rank,
     bf16,
-    test_size=1000,
-    dataset_path = DEFAULT_TRAINING_DATASET
+    dataset_text_column,
+    test_size = 1000,
+    dataset_id_or_path = DEFAULT_TRAINING_DATASET,
+    model_id_or_path = DEFAULT_INPUT_MODEL
 ):
     set_seed(seed)
 
-    model, tokenizer = get_model_tokenizer(gradient_checkpointing=gradient_checkpointing)
+    model, tokenizer = get_model_tokenizer(
+        pretrained_model_name_or_path = model_id_or_path,
+        gradient_checkpointing = gradient_checkpointing
+    )
 
     # Use the same max length that the model supports.  Try a couple different keys in case a different
     # model is used.  The default model uses n_positions.  If no config settings can be found just default
     # to 1024 as this is probably supported by most models.
     conf = model.config
     max_length: int = getattr(conf, "n_positions", getattr(conf, "seq_length", 1024))
-    dataset = load_training_dataset(dataset_path)
+    dataset = load_training_dataset(dataset_id_or_path)
     processed_dataset = preprocess_dataset(dataset = dataset, tokenizer=tokenizer, max_length=max_length, seed=seed)
-
     split_dataset = processed_dataset.train_test_split(test_size=test_size, seed=seed)
 
     data_collator = DataCollatorForCompletionOnlyLM(
@@ -265,6 +271,9 @@ def train(
 @click.option("--lr", type=float, default=1e-5, help="Learning rate to use for training.")
 @click.option("--seed", type=int, default=DEFAULT_SEED, help="Seed to use for training.")
 @click.option("--deepspeed", type=str, default=None, help="Path to deepspeed config file.")
+@click.option("--dataset-id-or-path", type=str, default=DEFAULT_TRAINING_DATASET, help="Path to the dataset which will be used for training.")
+@click.option("--dataset-text-column", type=str, default="text", help="Column containing prompt text.")
+@click.option("--model-id-or-path", type=str, default=DEFAULT_INPUT_MODEL, help="Input model")
 @click.option(
     "--gradient-checkpointing/--no-gradient-checkpointing",
     is_flag=True,
